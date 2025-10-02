@@ -59,7 +59,7 @@ fi;
 
 ## Modification for Shield TV
 
-rootdevs="sda1 sdb1 mmcblk2p1 mmcblk0p29 sda32 sda33 sda34 mmcblk0p19 dead"
+rootdevs="sda1 mmcblk2p1 mmcblk0p32 mmcblk0p33 dead"
 for rootdev in ${rootdevs}
 do
 	if [ "${rootdev}" == "dead" ]; then

@@ -1,0 +1,105 @@
+#!/bin/bash
+
+# Copyright (c) 2014-2020, NVIDIA CORPORATION. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#  * Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#  * Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#  * Neither the name of NVIDIA CORPORATION nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+# PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+# OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+count=0;
+
+echo "Starting Shield TV initial RAM disk" > /dev/kmsg;
+
+#Mount procfs, devfs, sysfs and debugfs
+mount -t proc proc /proc
+if [ $? -ne 0 ]; then
+	echo "ERROR: mounting proc fail..." > /dev/kmsg;
+	exec /bin/bash;
+fi;
+mount -t devtmpfs none /dev
+if [ $? -ne 0 ]; then
+	echo "ERROR: mounting dev fail..." > /dev/kmsg;
+	exec /bin/bash;
+fi;
+mount -t sysfs sysfs /sys
+if [ $? -ne 0 ]; then
+	echo "ERROR: mounting sys fail..." > /dev/kmsg;
+	exec /bin/bash;
+fi;
+mount -t debugfs none /sys/kernel/debug/
+if [ $? -ne 0 ]; then
+	echo "ERROR: mounting debugfs fail..." > /dev/kmsg;
+	exec /bin/bash;
+fi;
+
+# create reboot command based on sysrq-trigger
+if [ -e "/proc/sysrq-trigger" ]; then
+	echo -e "#!/bin/bash \necho b > /proc/sysrq-trigger;" > /sbin/reboot;
+	chmod 755 /sbin/reboot;
+fi;
+
+## Modification for Shield TV
+
+rootdevs="sda1 sdb1 mmcblk2p1 mmcblk0p29 sda32 sda33 sda34 mmcblk0p19 dead"
+for rootdev in ${rootdevs}
+do
+	if [ "${rootdev}" == "dead" ]; then
+		echo "ERROR: no working root device found." > /dev/kmsg;
+		exec /bin/bash;
+	fi;
+	if [ ! -e "/dev/${rootdev}" ]; then
+		count=0;
+		while [ ${count} -lt 20 ]
+		do
+			sleep 0.2;
+			count=`expr $count + 1`;
+			if [ -e "/dev/${rootdev}" ]; then
+				break;
+			fi
+		done
+	fi
+	mount /dev/${rootdev} /mnt/;
+	if [ $? -ne 0 ]; then
+		echo "ERROR: ${rootdev} mount fail..." > /dev/kmsg;
+	elif [ ! -e "/mnt/sbin/init" ] && [ ! -L "/mnt/sbin/init" ]; then
+		echo "ERROR: ${rootdev} missing /sbin/init..." > /dev/kmsg;
+		umount /mnt;
+	else
+		break;
+	fi;
+done
+
+## End modification for Shield TV
+
+# Disable luks-srv TA
+nvluks-srv-app -n > /dev/null 2>&1;
+
+echo "Rootfs mounted over ${rootdev}" > /dev/kmsg;
+mount -o bind /proc /mnt/proc;
+mount -o bind /sys /mnt/sys;
+mount -o bind /dev/ /mnt/dev;
+cd /mnt;
+
+echo "Switching from initrd to actual rootfs" > /dev/kmsg;
+mount --move . /
+
+exec chroot . /sbin/init 2;
